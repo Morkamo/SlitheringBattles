@@ -3,7 +3,7 @@ using UnityEngine.InputSystem;
 
 [DisallowMultipleComponent]
 [RequireComponent(typeof(Rigidbody2D))]
-public sealed class SnakeSlitherMovement2D : MonoBehaviour
+public sealed class SnakeSlitherMovement : MonoBehaviour
 {
     [Header("Input")]
     [SerializeField] private InputActionAsset actions;

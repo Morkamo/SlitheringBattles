@@ -1,14 +1,15 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Serialization;
 
-public sealed class SnakeBodySegments2D : MonoBehaviour
+public sealed class SnakeBodySegments : MonoBehaviour
 {
     [SerializeField] private Transform head;
     [SerializeField] private Transform segmentsRoot;
     [SerializeField] private Transform segmentPrefab;
-
+    
     [Header("Setup")]
-    [SerializeField] private int initialSegments = 6;
+    [SerializeField] public int SnakeSegments = 5;
     [SerializeField] private float segmentSpacing = 0.25f;
 
     [Header("History")]
@@ -46,24 +47,25 @@ public sealed class SnakeBodySegments2D : MonoBehaviour
 
     private void FixedUpdate()
     {
+        StabilizeSegmentsRootRotation();
         CaptureHeadHistory();
         UpdateSegments();
         TrimHistory();
     }
 
-    private void LateUpdate()
+    private void StabilizeSegmentsRootRotation()
     {
-        if (segmentsRoot == null)
+        if (segmentsRoot == null || head == null)
             return;
 
-        segmentsRoot.rotation = Quaternion.identity;
+        segmentsRoot.localRotation = Quaternion.Inverse(head.localRotation);
     }
 
     private void BuildInitialBody()
     {
         ClearSegments();
 
-        for (int i = 0; i < initialSegments; i++)
+        for (int i = 0; i < SnakeSegments; i++)
             AddSegmentInternal();
     }
 
@@ -124,47 +126,58 @@ public sealed class SnakeBodySegments2D : MonoBehaviour
             return;
 
         float traveled = 0f;
-        int histIndex = 0;
-        Vector2 prev = history[0];
+        int i = 0;
+        Vector2 a = history[0];
 
         for (int s = 0; s < segments.Count; s++)
         {
             float targetDist = segmentSpacing * (s + 1);
 
-            while (histIndex + 1 < history.Count)
+            while (i + 1 < history.Count)
             {
-                Vector2 next = history[histIndex + 1];
-                float d = Vector2.Distance(prev, next);
+                Vector2 b = history[i + 1];
+                float d = Vector2.Distance(a, b);
 
                 if (traveled + d >= targetDist)
                     break;
 
                 traveled += d;
-                prev = next;
-                histIndex++;
+                a = b;
+                i++;
             }
 
+            Vector2 b2 = history[Mathf.Min(i + 1, history.Count - 1)];
+            float segLen = Vector2.Distance(a, b2);
+            float remain = targetDist - traveled;
+
+            float t = segLen > 0.00001f ? Mathf.Clamp01(remain / segLen) : 0f;
+            Vector2 exactPos = Vector2.Lerp(a, b2, t);
+
             var currentPos = (Vector2)segments[s].position;
-            var smoothPos = Vector2.Lerp(currentPos, prev, positionLerp);
+            var smoothPos = Vector2.Lerp(currentPos, exactPos, positionLerp);
             segments[s].position = smoothPos;
 
-            float targetAngle = ComputeStableTangentAngle(histIndex);
-            float maxStep = segmentTurnSpeed * Time.fixedDeltaTime;
+            Vector2 tangent = GetTangentAt(i, t);
 
-            float vel = segmentAngleVelocities[s];
-            float smoothed = Mathf.SmoothDampAngle(
-                segmentAngles[s],
-                targetAngle,
-                ref vel,
-                rotationSmoothTime,
-                segmentTurnSpeed,
-                Time.fixedDeltaTime
-            );
+            if (tangent.sqrMagnitude > 0.0001f)
+            {
+                float targetAngle = Mathf.Atan2(tangent.y, tangent.x) * Mathf.Rad2Deg;
 
-            segmentAngleVelocities[s] = vel;
-            segmentAngles[s] = Mathf.MoveTowardsAngle(segmentAngles[s], smoothed, maxStep);
+                float vel = segmentAngleVelocities[s];
+                float smoothed = Mathf.SmoothDampAngle(
+                    segmentAngles[s],
+                    targetAngle,
+                    ref vel,
+                    rotationSmoothTime,
+                    segmentTurnSpeed,
+                    Time.fixedDeltaTime
+                );
 
-            segments[s].rotation = Quaternion.Euler(0f, 0f, segmentAngles[s]);
+                segmentAngleVelocities[s] = vel;
+                segmentAngles[s] = smoothed;
+
+                segments[s].localRotation = Quaternion.Euler(0f, 0f, segmentAngles[s]);
+            }
         }
     }
 
@@ -189,5 +202,21 @@ public sealed class SnakeBodySegments2D : MonoBehaviour
 
         if (history.Count > maxHistoryPoints)
             history.RemoveRange(maxHistoryPoints, history.Count - maxHistoryPoints);
+    }
+    
+    private Vector2 GetTangentAt(int segmentIndex, float t)
+    {
+        int a = Mathf.Clamp(segmentIndex, 0, history.Count - 1);
+        int b = Mathf.Clamp(segmentIndex + 1, 0, history.Count - 1);
+
+        Vector2 dir = history[a] - history[b];
+
+        if (dir.sqrMagnitude > 0.0001f)
+            return dir.normalized;
+
+        int c = Mathf.Clamp(segmentIndex + 2, 0, history.Count - 1);
+        dir = history[a] - history[c];
+
+        return dir.sqrMagnitude > 0.0001f ? dir.normalized : Vector2.right;
     }
 }
